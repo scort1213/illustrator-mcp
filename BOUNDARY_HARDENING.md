@@ -24,6 +24,15 @@ Branch: `codex/boundary-hardening`. The tested host is Windows, Illustrator
   the application mutex and does not undo or replay a command.
 - All script/capture failures use MCP `isError:true`. Normal script text that
   happens to begin with `Error:` is not itself treated as an execution exception.
+- Windows JSX files live in unique owned directories and are removed on both
+  normal and exceptional COM returns. Forced MCP termination can leave a
+  directory behind. Explicit recovery first verifies a fresh Adobe snapshot
+  under the application mutex, then removes only directories whose recorded
+  owner process has exited. Live, malformed, unrelated and linked directories
+  are retained. Recovery reports `removed_stale_script_directories`.
+  The default root is `%TEMP%/illustrator-mcp-scripts`; an explicit
+  `ILLUSTRATOR_SCRIPT_DIR` overrides it. Legacy unmarked temporary files are
+  not automatically removed because their ownership cannot be established.
 - `view` captures the application window. Minimized/unavailable windows report
   an error instead of falling back to the desktop. Arbitrary duplicate-window
   configurations and alternate DPI/monitor configurations are not certified.

@@ -12,9 +12,11 @@ import sys
 try:
     from . import safety
     from .guard import wrap, STATE_SCRIPT
+    from .script_files import cleanup_stale_scripts
 except ImportError:
     import safety
     from guard import wrap, STATE_SCRIPT
+    from script_files import cleanup_stale_scripts
 import mcp.types as types
 from mcp.server.models import InitializationOptions
 from mcp.server import NotificationOptions, Server
@@ -203,6 +205,9 @@ async def _handle_call_tool(name: str, arguments: dict | None):
             parsed = json.loads(result)
             if not isinstance(parsed, dict) or not isinstance(parsed.get("version"), str) or not isinstance(parsed.get("documents"), list):
                 raise RuntimeError("invalid_state_response: Illustrator snapshot could not be verified")
+            if recover:
+                parsed['removed_stale_script_directories'] = cleanup_stale_scripts()
+                return json.dumps(parsed, ensure_ascii=False)
             return result
         result = await safety.execute(read_state, read_only=True, recover=recover)
         return [types.TextContent(type="text", text=result)]

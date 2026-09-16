@@ -17,6 +17,11 @@ import time
 
 from PIL import Image
 
+try:
+    from .script_files import script_file
+except ImportError:
+    from script_files import script_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -103,20 +108,12 @@ class WindowsBackend(IllustratorBackend):
         return self._image_to_base64_jpeg(screenshot)
 
     def run_script(self, code: str) -> str:
-        with tempfile.NamedTemporaryFile(suffix=".jsx", delete=False, mode="w",
-                                         encoding="utf-8") as f:
-            f.write(code)
-            jsx_path = f.name
-
-        try:
+        with script_file(code) as jsx_path:
             logger.debug("ExtendScript saved to: %s", jsx_path)
             app = self._win32com.client.Dispatch("Illustrator.Application")
             result = app.DoJavaScriptFile(jsx_path)
             logger.info("ExtendScript executed successfully (Windows/COM).")
             return str(result) if result is not None else "Script executed successfully (no return value)"
-        finally:
-            os.unlink(jsx_path)
-            logger.debug("Temporary .jsx file removed.")
 
 
 # =====================================================================
@@ -242,4 +239,3 @@ def get_backend() -> IllustratorBackend:
             f"Unsupported platform: {sys.platform}. "
             "This project supports Windows and macOS."
         )
-
