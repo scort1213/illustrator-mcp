@@ -80,11 +80,26 @@ class WindowsBackend(IllustratorBackend):
 
     def capture_screenshot(self) -> str:
         from PIL import ImageGrab
+        import win32gui
 
-        self.focus_app()
-        time.sleep(1)
-        screenshot = ImageGrab.grab()
-        logger.info("Screenshot captured (Windows/ImageGrab).")
+        # Capture the application itself, even when another window covers it.
+        # Desktop capture can otherwise return the AI client instead of the art.
+        windows = []
+        def collect_window(hwnd, _):
+            if (win32gui.IsWindowVisible(hwnd)
+                    and "illustrator" in win32gui.GetClassName(hwnd).lower()):
+                windows.append(hwnd)
+        win32gui.EnumWindows(collect_window, None)
+        if not windows:
+            raise RuntimeError("No visible Illustrator window found. Open Illustrator first.")
+        hwnd = max(windows, key=lambda handle: (
+            (win32gui.GetWindowRect(handle)[2] - win32gui.GetWindowRect(handle)[0])
+            * (win32gui.GetWindowRect(handle)[3] - win32gui.GetWindowRect(handle)[1])
+        ))
+        if win32gui.IsIconic(hwnd):
+            raise RuntimeError("Illustrator is minimized. Restore its window before capturing.")
+        screenshot = ImageGrab.grab(window=hwnd)
+        logger.info("Screenshot captured (Windows/Illustrator window).")
         return self._image_to_base64_jpeg(screenshot)
 
     def run_script(self, code: str) -> str:
