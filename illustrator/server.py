@@ -9,6 +9,12 @@ import time
 import json
 import sys
 
+try:
+    from . import safety
+    from .guard import wrap, STATE_SCRIPT
+except ImportError:
+    import safety
+    from guard import wrap, STATE_SCRIPT
 import mcp.types as types
 from mcp.server.models import InitializationOptions
 from mcp.server import NotificationOptions, Server
@@ -40,7 +46,7 @@ except ImportError:
 
 # Set up logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
@@ -84,6 +90,8 @@ Add this MCP config in your client settings (Claude Desktop / Claude Code / Curs
 async def handle_list_tools() -> list[types.Tool]:
     logging.info("Listing available tools.")
     return [
+        types.Tool(name="get_state", description="Read Illustrator version and open document paths/counts without editing.", inputSchema={"type":"object","properties":{}}),
+        types.Tool(name="recover_connection", description="After inspecting get_state, acknowledge partial changes and unlock writes. Does not undo or retry.", inputSchema={"type":"object","properties":{"acknowledge":{"type":"boolean"}},"required":["acknowledge"]}),
         types.Tool(
             name="view",
             description="View a screenshot of the Adobe Illustrator window",
@@ -95,7 +103,9 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "description": "ExtendScript code to execute."}
+                    "code": {"type": "string", "minLength":1, "description": "Trusted ExtendScript code; not sandboxed."},
+                    "target_path": {"type":"string", "description":"Full path of an open saved document; required when several documents are open."},
+                    "timeout_seconds": {"type":"number", "exclusiveMinimum":0, "maximum":120, "default":30}
                 },
                 "required": ["code"],
             },
@@ -181,18 +191,30 @@ def run_illustrator_script(code: str) -> list[types.TextContent]:
         logging.error(f"Failed to execute script: {str(e)}")
         return [types.TextContent(type="text", text=f"Failed to execute script: {str(e)}")]
 
-@server.call_tool()
-async def handle_call_tool(name: str, arguments: dict | None):
-    logging.info(f"Received tool call: {name} with arguments: {arguments}")
+async def _handle_call_tool(name: str, arguments: dict | None):
+    logging.info("Received tool call: %s", name)
     
+    if name in ("get_state", "recover_connection"):
+        recover = name == "recover_connection"
+        if recover and (not arguments or arguments.get("acknowledge") is not True):
+            raise ValueError("invalid_argument: acknowledge must be true after inspecting state")
+        def read_state():
+            result = _get_backend().run_script(STATE_SCRIPT)
+            parsed = json.loads(result)
+            if not isinstance(parsed, dict) or not isinstance(parsed.get("version"), str) or not isinstance(parsed.get("documents"), list):
+                raise RuntimeError("invalid_state_response: Illustrator snapshot could not be verified")
+            return result
+        result = await safety.execute(read_state, read_only=True, recover=recover)
+        return [types.TextContent(type="text", text=result)]
     if name == "view":
-        return capture_illustrator()
+        return await safety.execute(capture_illustrator, read_only=True)
     
     elif name == "run":
         if not arguments or "code" not in arguments:
-            logging.warning("No code provided for run tool.")
-            return [types.TextContent(type="text", text="No code provided")]
-        return run_illustrator_script(arguments["code"])
+            raise ValueError("invalid_argument: code is required")
+        wrapped = wrap(arguments["code"], arguments.get("target_path"))
+        result = await safety.execute(lambda: _get_backend().run_script(wrapped), timeout=arguments.get("timeout_seconds", 30))
+        return [types.TextContent(type="text", text=result)]
     
     elif name == "get_prompt_suggestions":
         try:
@@ -299,6 +321,17 @@ async def handle_call_tool(name: str, arguments: dict | None):
         error_msg = f"Unknown tool: {name}"
         logging.error(error_msg)
         raise ValueError(error_msg)
+
+@server.call_tool()
+async def handle_call_tool(name: str, arguments: dict | None):
+    try:
+        content = await _handle_call_tool(name, arguments)
+        failed = name != "run" and any(isinstance(c, types.TextContent) and c.text.startswith(("Failed to", "Error:", "No code provided", "Template type is required")) for c in content)
+        return types.CallToolResult(content=content, isError=failed)
+    except Exception as error:
+        message = str(error)
+        code = next((x for x in ("outcome_unknown", "queue_timeout", "invalid_argument", "document_not_found", "ambiguous_document") if x in message), "execution_failed")
+        return types.CallToolResult(isError=True, content=[types.TextContent(type="text", text=json.dumps({"ok":False,"code":code,"message":message,"suggested_next_tool":"get_state"}, ensure_ascii=False))])
 
 async def main():
     try:

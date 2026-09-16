@@ -7,10 +7,10 @@ name = "illustrator"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "httpx>=0.28.1",
-    "mcp>=1.1.1,<2",
-    "pillow>=11.2.1",
-    "pywin32>=306; sys_platform == 'win32'",
+    "httpx==0.28.1",
+    "mcp==1.30.0",
+    "pillow==12.3.0",
+    "pywin32==312; sys_platform == 'win32'",
 ]
 
 [project.scripts]

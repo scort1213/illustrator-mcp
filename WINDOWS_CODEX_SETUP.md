@@ -3,9 +3,15 @@
 This fork's `codex/windows-setup` branch was verified on Illustrator 2024
 (28.6.0), Python 3.12, MCP SDK 1.30.0, Pillow 12.3.0 and pywin32 312.
 
+The newer `codex/boundary-hardening` branch exposes 9 tools, including state
+inspection and explicit recovery. It adds serialized COM work, target checks and
+persistent timeout quarantine. See [the hardening contract](BOUNDARY_HARDENING.md)
+for current limits; the historical smoke results below are not full acceptance.
+
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --no-deps -e .
 codex mcp add illustrator --env PYTHONIOENCODING=utf-8 --env PYTHONUTF8=1 -- C:\absolute\path\illustrator-mcp\.venv\Scripts\python.exe -m illustrator
 ```
 
