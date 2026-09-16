@@ -15,6 +15,10 @@ Branch: `codex/boundary-hardening`. The tested host is Windows, Illustrator
   not dispatched. Executing writes may finish after a timeout; subsequent writes
   remain blocked rather than being silently retried.
 - `get_state` reports version, open document paths, saved flags and object counts.
+  It also reports each placed image's path and resource status. A missing file
+  can make Illustrator throw while reading `PlacedItem.file`; the snapshot
+  preserves this as `missing_or_unavailable` plus the error detail instead of
+  failing the entire document snapshot or claiming the link is healthy.
   After inspecting partial changes, use
   `recover_connection({"acknowledge":true})`. Recovery reads state while holding
   the application mutex and does not undo or replay a command.
@@ -34,6 +38,10 @@ list. Do not upgrade to SDK 2 without adapting the server API and rerunning test
 uv sync --frozen --no-dev --python 3.12
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
+
+The state-script regression test executes mock Adobe objects with Node.js.
+Put Node on PATH (or set ADOBE_BOUNDARY_NODE) to include it; otherwise unittest
+explicitly reports that test skipped. No Node runtime is needed by the server.
 
 Alternatively create a Python 3.12 venv, install dependencies with
 `pip install --require-hashes -r requirements.txt`, then install the local project
