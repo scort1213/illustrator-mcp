@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -15,3 +15,9 @@ dependencies = [
 
 [project.scripts]
 illustrator = "illustrator.cli:run_server"
+
+[tool.hatch.build.targets.wheel]
+packages = ["illustrator"]
+
+[tool.hatch.build.targets.sdist]
+include = ["illustrator", "tests", "pyproject.toml", "README.md", "WINDOWS_CODEX_SETUP.md", "ACCEPTANCE_ZH.md", "BOUNDARY_HARDENING.md", "PROMPT_EXAMPLES.md", "requirements.txt", "uv.lock", "install-windows.ps1"]

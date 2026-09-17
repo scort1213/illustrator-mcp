@@ -1,3 +1,17 @@
+# Illustrator MCP Windows 加固版
+
+用于 Codex 等 MCP 客户端控制本机 Adobe Illustrator。已在 Windows + Illustrator 2024 (28.6.0) 完成实机和 Codex 对话入口主流程验收。
+
+- [Windows 安装与 Codex 配置](WINDOWS_CODEX_SETUP.md)
+- [中文验收记录与尚未覆盖的边界](ACCEPTANCE_ZH.md)
+- [安全机制与恢复约定](BOUNDARY_HARDENING.md)
+
+下载此分支源码 ZIP 并解压，安装 Python 3.12，然后运行 `powershell -File .\install-windows.ps1`。安装脚本创建独立环境，不修改 Codex 配置。详细步骤见上方安装说明。
+
+本 Fork 基于 [krVatsal/illustrator-mcp](https://github.com/krVatsal/illustrator-mcp)，保留原项目说明如下。Windows 用户以以上安装和验收文档为准；macOS 路径未在此加固版实机认证。
+
+---
+
 # Illustrator MCP Server (Windows & macOS)
 
 Welcome to the **Illustrator MCP Server**! 🎨🚀
@@ -31,7 +45,7 @@ Works on **Windows** (COM automation) and **macOS** (AppleScript/osascript).
 ### 1. Clone the repository
 
    ```bash
-   git clone https://github.com/krVatsal/illustrator-mcp.git
+   git clone --branch codex/boundary-hardening https://github.com/scort1213/illustrator-mcp.git
    cd illustrator-mcp
    ```
 
