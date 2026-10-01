@@ -1,5 +1,6 @@
 """Verify client guidance without starting or scripting an Adobe application."""
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
@@ -8,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -25,6 +26,31 @@ EXPECTED_TOOLS = {
 
 
 class LocalPolicyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_paths_are_validated_before_stdio_and_without_adobe(self):
+        events = []
+        @asynccontextmanager
+        async def streams():
+            events.append('stdio')
+            yield 'read', 'write'
+        def validate(*args):
+            events.append('validate')
+        async def run(*args):
+            events.append('run')
+        with patch.object(server, 'validate_runtime_paths', side_effect=validate) as check, patch('mcp.server.stdio.stdio_server', streams), patch.object(server.server, 'run', new=AsyncMock(side_effect=run)), patch.object(server, '_get_backend') as backend, patch.object(Path, 'mkdir') as mkdir:
+            await server.main()
+        self.assertEqual(events, ['validate', 'stdio', 'run'])
+        check.assert_called_once_with(str(Path(server.__file__).absolute().parent), sys.executable)
+        backend.assert_not_called(); mkdir.assert_not_called()
+
+    async def test_unsafe_startup_storage_fails_before_stdio_mkdir_or_adobe(self):
+        with tempfile.TemporaryDirectory(prefix='ai-startup-') as directory:
+            environment = {'ILLUSTRATOR_SCRIPT_DIR':'//example.invalid/share',
+                           'ILLUSTRATOR_SAFETY_DIR': directory}
+            with patch.dict(os.environ, environment), patch('mcp.server.stdio.stdio_server') as streams, patch.object(server, '_get_backend') as backend, patch.object(Path, 'mkdir') as mkdir:
+                with self.assertRaisesRegex(RuntimeError, 'local_path_required'):
+                    await server.main()
+                streams.assert_not_called(); backend.assert_not_called(); mkdir.assert_not_called()
+
     async def test_real_stdio_handshake_delivers_policy_and_keeps_all_tools(self):
         # Fail the child if normal MCP handshake/prompt reads attempt a network connection.
         bootstrap = (
@@ -83,6 +109,21 @@ class LocalPolicyTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await server.handle_call_tool(name, arguments)
             self.assertIn(LOCAL_ONLY_INSTRUCTIONS, result.content[0].text)
+
+    async def test_requested_long_timeout_flows_through_real_server_and_mac_backend(self):
+        from illustrator.platform_backend import MacBackend
+        backend = MacBackend.__new__(MacBackend)
+        backend._APP_NAME = 'Adobe Illustrator'
+        with tempfile.TemporaryDirectory(prefix='ai-full-deadline-') as directory:
+            environment = {'ILLUSTRATOR_SAFETY_DIR': directory, 'ILLUSTRATOR_SCRIPT_DIR': directory}
+            with patch.dict(os.environ, environment), patch.object(server, '_get_backend', return_value=backend), patch('illustrator.local_paths._assert_mounted_locally'), patch('illustrator.platform_backend.subprocess.run') as child:
+                child.return_value = Mock(returncode=0, stdout='42', stderr='')
+                result = await server.handle_call_tool('run', {'code':'42', 'timeout_seconds':120})
+                self.assertFalse(result.isError)
+                self.assertEqual(result.content[0].text, '42')
+                self.assertEqual(child.call_count, 1)
+                self.assertGreater(child.call_args.kwargs['timeout'], 100)
+                self.assertLessEqual(child.call_args.kwargs['timeout'], 120)
 
     @unittest.skipUnless(shutil.which("bash"), "Bash is required for launcher stdio verification")
     async def test_real_launcher_stdio_handshake(self):

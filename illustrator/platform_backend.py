@@ -12,28 +12,56 @@ import logging
 import os
 import subprocess
 import sys
-import tempfile
 import time
+import math
 
 from PIL import Image
 
 try:
-    from .script_files import script_file
+    from .script_files import script_file, owned_directory
+    from .local_paths import storage_directory, validate_internal_path
 except ImportError:
-    from script_files import script_file
+    from script_files import script_file, owned_directory
+    from local_paths import storage_directory, validate_internal_path
 
 logger = logging.getLogger(__name__)
+
+
+def remaining_seconds(deadline=None):
+    remaining = 30.0 if deadline is None else deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('execution_timeout: deadline expired before subprocess dispatch')
+    return remaining
+
+
+def applescript_string(value):
+    """Encode literal strings, including quotes, backslashes and C0 characters."""
+    parts, text = [], []
+    def flush():
+        if text:
+            parts.append('"' + ''.join(text).replace('\\', '\\\\').replace('"', '\\"') + '"')
+            text.clear()
+    for character in value:
+        if ord(character) < 32:
+            flush()
+            parts.append('(ASCII character %d)' % ord(character))
+        else:
+            text.append(character)
+    flush()
+    if len(parts) == 1:
+        return parts[0]
+    return '(' + ' & '.join(parts or ['""']) + ')'
 
 
 class IllustratorBackend(abc.ABC):
     """Abstract base class for platform-specific Illustrator automation."""
 
     @abc.abstractmethod
-    def focus_app(self) -> None:
+    def focus_app(self, *, deadline=None) -> None:
         """Bring Adobe Illustrator to the foreground."""
 
     @abc.abstractmethod
-    def capture_screenshot(self) -> str:
+    def capture_screenshot(self, *, deadline=None) -> str:
         """Capture a screenshot of the Illustrator window.
 
         Returns:
@@ -41,7 +69,7 @@ class IllustratorBackend(abc.ABC):
         """
 
     @abc.abstractmethod
-    def run_script(self, code: str) -> str:
+    def run_script(self, code: str, *, deadline=None) -> str:
         """Execute ExtendScript code in Illustrator.
 
         Args:
@@ -79,11 +107,12 @@ class WindowsBackend(IllustratorBackend):
                 "pywin32 is required on Windows. Install it with: pip install pywin32"
             ) from exc
 
-    def focus_app(self) -> None:
+    def focus_app(self, *, deadline=None) -> None:
+        remaining_seconds(deadline)
         shell = self._win32com.client.Dispatch("WScript.Shell")
         shell.AppActivate("Adobe Illustrator")
 
-    def capture_screenshot(self) -> str:
+    def capture_screenshot(self, *, deadline=None) -> str:
         from PIL import ImageGrab
         import win32gui
 
@@ -103,14 +132,18 @@ class WindowsBackend(IllustratorBackend):
         ))
         if win32gui.IsIconic(hwnd):
             raise RuntimeError("Illustrator is minimized. Restore its window before capturing.")
+        remaining_seconds(deadline)
         screenshot = ImageGrab.grab(window=hwnd)
         logger.info("Screenshot captured (Windows/Illustrator window).")
         return self._image_to_base64_jpeg(screenshot)
 
-    def run_script(self, code: str) -> str:
+    def run_script(self, code: str, *, deadline=None) -> str:
+        remaining_seconds(deadline)
         with script_file(code) as jsx_path:
             logger.debug("ExtendScript saved to: %s", jsx_path)
+            remaining_seconds(deadline)
             app = self._win32com.client.Dispatch("Illustrator.Application")
+            remaining_seconds(deadline)
             result = app.DoJavaScriptFile(jsx_path)
             logger.info("ExtendScript executed successfully (Windows/COM).")
             return str(result) if result is not None else "Script executed successfully (no return value)"
@@ -133,31 +166,19 @@ class MacBackend(IllustratorBackend):
         if not os.path.isfile("/usr/bin/osascript"):
             raise RuntimeError("osascript not found – this backend requires macOS.")
 
-        # Verify we can talk to Illustrator (also triggers the macOS
-        # Automation permission dialog on first run).
-        try:
-            self._osascript(f'tell application "{self._APP_NAME}" to get version')
-            logger.info("MacBackend initialised – can communicate with Illustrator.")
-        except RuntimeError as exc:
-            logger.warning(
-                "Could not communicate with Adobe Illustrator: %s. "
-                "Make sure Illustrator is running and macOS Automation "
-                "permissions are granted (System Settings → Privacy & "
-                "Security → Automation).",
-                exc,
-            )
-            # Don't raise — the user may start Illustrator later.
+        # A tool's actual script establishes connectivity inside that tool's
+        # deadline; construction does not dispatch a separate version probe.
 
     # ---- helpers -------------------------------------------------------
 
     @staticmethod
-    def _osascript(script: str) -> str:
+    def _osascript(script: str, *, deadline=None) -> str:
         """Run a one-liner AppleScript and return stdout."""
         result = subprocess.run(
-            ["osascript", "-e", script],
+            ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=remaining_seconds(deadline),
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
@@ -165,12 +186,12 @@ class MacBackend(IllustratorBackend):
         return result.stdout.strip()
 
     @staticmethod
-    def _osascript_multi(lines: list[str]) -> str:
+    def _osascript_multi(lines: list[str], *, deadline=None) -> str:
         """Run a multi-line AppleScript passed as separate -e arguments."""
-        cmd: list[str] = ["osascript"]
+        cmd: list[str] = ["/usr/bin/osascript"]
         for line in lines:
             cmd.extend(["-e", line])
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=remaining_seconds(deadline))
         if result.returncode != 0:
             stderr = result.stderr.strip()
             raise RuntimeError(f"osascript failed ({result.returncode}): {stderr}")
@@ -178,50 +199,45 @@ class MacBackend(IllustratorBackend):
 
     # ---- interface implementation --------------------------------------
 
-    def focus_app(self) -> None:
-        self._osascript(f'tell application "{self._APP_NAME}" to activate')
+    def focus_app(self, *, deadline=None) -> None:
+        self._osascript(f'tell application {applescript_string(self._APP_NAME)} to activate', deadline=deadline)
 
-    def capture_screenshot(self) -> str:
-        self.focus_app()
-        time.sleep(1)  # give Illustrator time to come to foreground
-
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-            tmp_path = f.name
-
-        try:
+    def capture_screenshot(self, *, deadline=None) -> str:
+        if deadline is None:
+            deadline = time.monotonic() + 30
+        root = storage_directory('preview')
+        with owned_directory(root, prefix='capture-') as directory:
+            tmp_path = str(validate_internal_path(directory / 'preview.jpg'))
+            self.focus_app(deadline=deadline)
+            time.sleep(min(1, remaining_seconds(deadline)))
             # -x  suppresses the shutter sound
             # -t jpg  output format
             subprocess.run(
-                ["screencapture", "-x", "-t", "jpg", tmp_path],
+                ["/usr/sbin/screencapture", "-x", "-t", "jpg", tmp_path],
                 check=True,
-                timeout=10,
+                timeout=min(10, remaining_seconds(deadline)),
             )
-            img = Image.open(tmp_path)
-            logger.info("Screenshot captured (macOS/screencapture).")
-            return self._image_to_base64_jpeg(img)
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+            with Image.open(tmp_path) as img:
+                logger.info("Screenshot captured (macOS/screencapture).")
+                return self._image_to_base64_jpeg(img)
 
-    def run_script(self, code: str) -> str:
-        with tempfile.NamedTemporaryFile(suffix=".jsx", delete=False, mode="w",
-                                         encoding="utf-8") as f:
-            f.write(code)
-            jsx_path = f.name
-
-        try:
+    def run_script(self, code: str, *, deadline=None) -> str:
+        if deadline is None:
+            deadline = time.monotonic() + 30
+        remaining_seconds(deadline)
+        with script_file(code) as jsx_path:
             logger.debug("ExtendScript saved to: %s", jsx_path)
             # Use AppleScript to tell Illustrator to run the script file.
+            seconds = max(1, math.ceil(remaining_seconds(deadline)))
             applescript = (
-                f'tell application "{self._APP_NAME}" to '
-                f'do javascript (read POSIX file "{jsx_path}") as string'
+                f'tell application {applescript_string(self._APP_NAME)}\n'
+                f'with timeout of {seconds} seconds\n'
+                f'do javascript (read POSIX file {applescript_string(jsx_path)} as «class utf8») as string\n'
+                'end timeout\nend tell'
             )
-            result = self._osascript(applescript)
+            result = self._osascript(applescript, deadline=deadline)
             logger.info("ExtendScript executed successfully (macOS/osascript).")
             return result if result else "Script executed successfully (no return value)"
-        finally:
-            os.unlink(jsx_path)
-            logger.debug("Temporary .jsx file removed.")
 
 
 # =====================================================================

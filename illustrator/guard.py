@@ -3,16 +3,14 @@ import json
 import os
 
 STATE_SCRIPT = r'''(function(){
- function q(s){return '"'+String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\r/g,'\\r').replace(/\n/g,'\\n').replace(/\t/g,'\\t')+'"';}
+ function q(s){return '"'+String(s).replace(/[\x00-\x1f"\\]/g,function(c){var h=c.charCodeAt(0).toString(16);return '\\u'+('0000'+h).slice(-4);})+'"';}
  var rows=[];
  for(var i=0;i<app.documents.length;i++){
   var d=app.documents[i],p='';try{p=d.fullName.fsName;}catch(e){}
   var links=[];
   for(var j=0;j<d.placedItems.length;j++){
-   var item=d.placedItems[j],linkPath='',status='available',detail='';
-   try{var file=item.file;linkPath=file.fsName;if(!file.exists)status='missing';}
-   catch(e){status='missing_or_unavailable';detail=String(e);}
-   links.push('{"index":'+j+',"name":'+q(item.name)+',"path":'+q(linkPath)+',"status":'+q(status)+',"detail":'+q(detail)+'}');
+   var item=d.placedItems[j];
+   links.push('{"index":'+j+',"name":'+q(item.name)+',"path":"","status":"not_checked","detail":"File paths and availability are not probed by this snapshot."}');
   }
   rows.push('{"name":'+q(d.name)+',"path":'+q(p)+',"saved":'+d.saved+',"layers":'+d.layers.length+',"text_frames":'+d.textFrames.length+',"page_items":'+d.pageItems.length+',"artboards":'+d.artboards.length+',"linked_items":['+links.join(',')+']}');
  }
@@ -24,17 +22,19 @@ def wrap(code, target_path=None):
         raise ValueError("invalid_argument: code must be a non-empty string")
     if target_path is not None and (not isinstance(target_path, str) or not target_path.strip() or not os.path.isabs(target_path)):
         raise ValueError("invalid_argument: target_path must be a non-empty absolute file path")
+    expected = 'new File(target).fsName.toLowerCase()' if os.name == 'nt' else 'target'
+    candidate = 'app.documents[i].fullName.fsName' + ('.toLowerCase()' if os.name == 'nt' else '')
     return '''(function(){
 var before=app.userInteractionLevel;
 try {
  app.userInteractionLevel=UserInteractionLevel.DONTDISPLAYALERTS;
  var target=%s;
  if(target!==null){
-  var expected=new File(target).fsName.toLowerCase(),found=null;
-  for(var i=0;i<app.documents.length;i++){try{if(app.documents[i].fullName.fsName.toLowerCase()===expected){if(found)throw new Error('ambiguous_document');found=app.documents[i];}}catch(e){if(String(e).indexOf('ambiguous_document')>=0)throw e;}}
+  var expected=%s,found=null;
+  for(var i=0;i<app.documents.length;i++){try{if(%s===expected){if(found)throw new Error('ambiguous_document');found=app.documents[i];}}catch(e){if(String(e).indexOf('ambiguous_document')>=0)throw e;}}
   if(!found)throw new Error('document_not_found: target_path is not open');
   app.activeDocument=found;
  }else if(app.documents.length>1)throw new Error('ambiguous_document: supply target_path');
  return eval(%s);
 }finally{app.userInteractionLevel=before;}
-})();''' % (json.dumps(target_path), json.dumps(code))
+})();''' % (json.dumps(target_path), expected, candidate, json.dumps(code))

@@ -24,28 +24,56 @@ explicit separate step. See `ACCEPTANCE_ZH.md` for verified and pending checks.
   open documents without a target are rejected. The wrapper restores the
   previous interaction level even after an exception. It is not a sandbox:
   trusted JSX can explicitly switch documents or access arbitrary files.
+  macOS compares the exact path returned by `get_state`, without a File
+  constructor or filesystem probe; Windows preserves its case-insensitive
+  normalization. An incorrect case on macOS is rejected rather than guessed.
 - `timeout_seconds` is in (0,120], including queue wait. Expired queued work is
   not dispatched. Executing writes may finish after a timeout; subsequent writes
   remain blocked rather than being silently retried.
+  The same absolute deadline is passed into the backend. macOS subprocesses
+  receive the remaining budget, not a separate fixed 30-second limit. Backend
+  construction no longer dispatches a version probe. Killing osascript does not
+  prove the JSX stopped inside Adobe; a timed-out write remains `outcome_unknown`.
 - `get_state` reports version, open document paths, saved flags and object counts.
-  It also reports each placed image's path and resource status. A missing file
-  can make Illustrator throw while reading `PlacedItem.file`; the snapshot
-  preserves this as `missing_or_unavailable` plus the error detail instead of
-  failing the entire document snapshot or claiming the link is healthy.
+  It reports each placed item's index and name, with `path:""` and
+  `status:"not_checked"`. It does not read `PlacedItem.file` or `File.exists`:
+  even a state query must not probe a linked network resource. `not_checked`
+  makes no claim that a resource is healthy or missing. String serialization
+  escapes all C0 controls, quotes and backslashes without requiring a JSX JSON
+  library.
   After inspecting partial changes, use
   `recover_connection({"acknowledge":true})`. Recovery reads state while holding
   the application mutex and does not undo or replay a command.
 - All script/capture failures use MCP `isError:true`. Normal script text that
   happens to begin with `Error:` is not itself treated as an execution exception.
-- Windows JSX files live in unique owned directories and are removed on both
-  normal and exceptional COM returns. Forced MCP termination can leave a
-  directory behind. Explicit recovery first verifies a fresh Adobe snapshot
-  under the application mutex, then removes only directories whose recorded
-  owner process has exited. Live, malformed, unrelated and linked directories
-  are retained. Recovery reports `removed_stale_script_directories`.
-  The default root is `%TEMP%/illustrator-mcp-scripts`; an explicit
+- Windows and macOS JSX files live in unique owned directories. Normal successful
+  calls remove their directory; exceptions, cancellation and timeout retain the
+  source for inspection. A late successful worker return after its deadline also
+  retains the source. Errors report `inspection_path` when one was created.
+  Forced MCP termination can likewise leave a directory behind. Explicit recovery
+  first verifies a fresh Adobe snapshot under the application mutex, then removes
+  only owned directories whose owner exited or whose call completed with a recorded
+  inspection requirement. The latter permits recovery in the same live MCP process;
+  an actively running call has no completed marker and is not reclaimed. Malformed,
+  unrelated and linked directories are retained. Recovery reports
+  `removed_stale_script_directories`.
+  The default root is `~/.illustrator-mcp/scripts`; an explicit
   `ILLUSTRATOR_SCRIPT_DIR` overrides it. Legacy unmarked temporary files are
   not automatically removed because their ownership cannot be established.
+- Internal safety and screenshot storage use `~/.illustrator-mcp/safety` and
+  `~/.illustrator-mcp/preview`, independent of TEMP/TMPDIR. The existing
+  `ILLUSTRATOR_SAFETY_DIR` override remains available. An absolute local path,
+  known local drive/filesystem and each link component are checked before mkdir.
+  Before establishing stdio, startup validates the package installation directory,
+  Python executable and all three configured storage roots without creating them
+  or contacting Adobe. A Python executable symlink is permitted only after its
+  resolved destination passes the local filesystem checks.
+  Link destinations are classified before being inspected; network/unknown
+  destinations and final-component links are rejected. Recovery also retains
+  owned trees containing links or unverified mounts. Mount information is cached
+  for one tool operation only. These checks do not sandbox user JSX paths.
+  Reload every client together and inspect state before upgrading writes; legacy
+  TEMP roots are not migrated automatically and do not share the new default lock.
 - `view` captures the application window. Minimized/unavailable windows report
   an error instead of falling back to the desktop. Arbitrary duplicate-window
   configurations and alternate DPI/monitor configurations are not certified.

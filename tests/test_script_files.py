@@ -1,8 +1,11 @@
 import asyncio
 import json
 import os
+import stat
+from types import SimpleNamespace
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch, AsyncMock
 from illustrator import script_files, server, safety
@@ -17,16 +20,24 @@ class ScriptFileTests(unittest.TestCase):
     def tearDown(self):
         self.env.stop();self.temp.cleanup()
 
-    def test_success_and_exception_both_remove_the_owned_directory(self):
-        for fail in (False,True):
-            with self.subTest(fail=fail):
-                try:
-                    with script_files.script_file('Chinese 中文 "quotes"') as path:
-                        self.assertTrue(Path(path).exists())
-                        if fail:raise RuntimeError('simulated COM failure')
-                except RuntimeError:
-                    pass
-                self.assertEqual(list(Path(self.temp.name).iterdir()),[])
+    def test_success_removes_the_owned_directory(self):
+        with script_files.script_file('Chinese 中文 "quotes"') as path:
+            self.assertTrue(Path(path).exists())
+        self.assertEqual(list(Path(self.temp.name).iterdir()),[])
+
+    def test_uncertain_exception_retains_source_and_reports_inspection_path(self):
+        with self.assertRaisesRegex(RuntimeError, 'simulated COM failure') as caught:
+            with script_files.script_file('Chinese 中文 "quotes"') as path:
+                raise RuntimeError('simulated COM failure')
+        directory = Path(caught.exception.inspection_path)
+        self.assertEqual((directory/'script.jsx').read_text(encoding='utf-8'), 'Chinese 中文 "quotes"')
+        owner = json.loads((directory/'owner.json').read_text())
+        self.assertTrue(owner['inspection_required'])
+        self.assertTrue(owner['completed'])
+        # Explicit recovery may clean a completed retained call, while the
+        # process is still alive; active call directories remain protected.
+        self.assertEqual(script_files.cleanup_stale_scripts(), 1)
+        self.assertFalse(directory.exists())
 
     def test_unique_paths_preserve_literal_source(self):
         text='Chinese 中文 U0001f9ea "quotes"\nnext'
@@ -48,12 +59,20 @@ class ScriptFileTests(unittest.TestCase):
         self.assertFalse((root/'call-123-dead').exists())
 
     def test_linked_root_is_rejected(self):
-        with patch.object(Path,'is_symlink',return_value=True):
-            with self.assertRaisesRegex(RuntimeError,'unsafe_script_directory'):
+        link = Path(self.temp.name) / 'linked-root'
+        link.mkdir()
+        canonical_link = link.resolve()
+        original = os.lstat
+        def lstat(path, *args, **kwargs):
+            if Path(path) == canonical_link:
+                return SimpleNamespace(st_mode=stat.S_IFLNK)
+            return original(path, *args, **kwargs)
+        with patch.dict(os.environ, {'ILLUSTRATOR_SCRIPT_DIR': str(link)}), patch('illustrator.local_paths.os.lstat', side_effect=lstat):
+            with self.assertRaisesRegex(RuntimeError,'local_path_required'):
                 script_files.script_root()
 
     def test_recovery_cleanup_requires_a_valid_adobe_snapshot(self):
-        async def execute(function,**kwargs):return function()
+        async def execute(function,**kwargs):return function(time.monotonic()+30) if kwargs.get('pass_deadline') else function()
         async def check():
             with patch.object(server,'_get_backend') as backend, patch.object(server,'cleanup_stale_scripts',return_value=2) as cleanup, patch.object(safety,'execute',new=AsyncMock(side_effect=execute)):
                 backend.return_value.run_script.return_value='invalid JSON'

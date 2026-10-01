@@ -14,11 +14,13 @@ try:
     from .guard import wrap, STATE_SCRIPT
     from .script_files import cleanup_stale_scripts
     from .local_policy import LOCAL_ONLY_INSTRUCTIONS
+    from .local_paths import validate_runtime_paths
 except ImportError:
     import safety
     from guard import wrap, STATE_SCRIPT
     from script_files import cleanup_stale_scripts
     from local_policy import LOCAL_ONLY_INSTRUCTIONS
+    from local_paths import validate_runtime_paths
 import mcp.types as types
 from mcp.server.models import InitializationOptions
 from mcp.server import NotificationOptions, Server
@@ -94,7 +96,7 @@ Add this MCP config in your client settings (Claude Desktop / Claude Code / Curs
 async def handle_list_tools() -> list[types.Tool]:
     logging.info("Listing available tools.")
     return [
-        types.Tool(name="get_state", description="Read Illustrator version and open document paths/counts without editing.", inputSchema={"type":"object","properties":{}}),
+        types.Tool(name="get_state", description="Read Illustrator version and open document paths/counts without editing. Linked item names are reported without reading file paths or checking availability.", inputSchema={"type":"object","properties":{}}),
         types.Tool(name="recover_connection", description="After inspecting get_state, acknowledge partial changes and unlock writes. Does not undo or retry.", inputSchema={"type":"object","properties":{"acknowledge":{"type":"boolean"}},"required":["acknowledge"]}),
         types.Tool(
             name="view",
@@ -112,7 +114,7 @@ async def handle_list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "code": {"type": "string", "minLength":1, "description": "Trusted local-operation ExtendScript; follow server instructions. Not filtered or sandboxed."},
-                    "target_path": {"type":"string", "description":"Full path of an open saved document; required when several documents are open."},
+                    "target_path": {"type":"string", "description":"Full path of an open saved document; required when several documents are open. On macOS copy the exact path returned by get_state, including its case."},
                     "timeout_seconds": {"type":"number", "exclusiveMinimum":0, "maximum":120, "default":30}
                 },
                 "required": ["code"],
@@ -177,11 +179,11 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
     ]
 
-def capture_illustrator() -> list[types.TextContent | types.ImageContent]:
+def capture_illustrator(deadline=None) -> list[types.TextContent | types.ImageContent]:
     logging.info("Starting screenshot capture for Illustrator.")
     try:
         backend = _get_backend()
-        screenshot_data = backend.capture_screenshot()
+        screenshot_data = backend.capture_screenshot(deadline=deadline)
         logging.info("Screenshot captured successfully.")
         return [types.ImageContent(type="image", mimeType="image/jpeg", data=screenshot_data)]
     except Exception as e:
@@ -206,8 +208,8 @@ async def _handle_call_tool(name: str, arguments: dict | None):
         recover = name == "recover_connection"
         if recover and (not arguments or arguments.get("acknowledge") is not True):
             raise ValueError("invalid_argument: acknowledge must be true after inspecting state")
-        def read_state():
-            result = _get_backend().run_script(STATE_SCRIPT)
+        def read_state(deadline):
+            result = _get_backend().run_script(STATE_SCRIPT, deadline=deadline)
             parsed = json.loads(result)
             if not isinstance(parsed, dict) or not isinstance(parsed.get("version"), str) or not isinstance(parsed.get("documents"), list):
                 raise RuntimeError("invalid_state_response: Illustrator snapshot could not be verified")
@@ -215,16 +217,16 @@ async def _handle_call_tool(name: str, arguments: dict | None):
                 parsed['removed_stale_script_directories'] = cleanup_stale_scripts()
                 return json.dumps(parsed, ensure_ascii=False)
             return result
-        result = await safety.execute(read_state, read_only=True, recover=recover)
+        result = await safety.execute(read_state, read_only=True, recover=recover, pass_deadline=True)
         return [types.TextContent(type="text", text=result)]
     if name == "view":
-        return await safety.execute(capture_illustrator, read_only=True)
+        return await safety.execute(capture_illustrator, read_only=True, pass_deadline=True)
     
     elif name == "run":
         if not arguments or "code" not in arguments:
             raise ValueError("invalid_argument: code is required")
         wrapped = wrap(arguments["code"], arguments.get("target_path"))
-        result = await safety.execute(lambda: _get_backend().run_script(wrapped), timeout=arguments.get("timeout_seconds", 30))
+        result = await safety.execute(lambda deadline: _get_backend().run_script(wrapped, deadline=deadline), timeout=arguments.get("timeout_seconds", 30), pass_deadline=True)
         return [types.TextContent(type="text", text=result)]
     
     elif name == "get_prompt_suggestions":
@@ -341,14 +343,19 @@ async def handle_call_tool(name: str, arguments: dict | None):
         return types.CallToolResult(content=content, isError=failed)
     except Exception as error:
         message = str(error)
-        code = next((x for x in ("outcome_unknown", "queue_timeout", "invalid_argument", "document_not_found", "ambiguous_document") if x in message), "execution_failed")
-        return types.CallToolResult(isError=True, content=[types.TextContent(type="text", text=json.dumps({"ok":False,"code":code,"message":message,"suggested_next_tool":"get_state"}, ensure_ascii=False))])
+        code = next((x for x in ("outcome_unknown", "queue_timeout", "execution_timeout", "local_path_required", "invalid_argument", "document_not_found", "ambiguous_document") if x in message), "execution_failed")
+        response = {"ok":False,"code":code,"message":message,"suggested_next_tool":"get_state"}
+        inspection = getattr(error, 'inspection_path', None)
+        if inspection:
+            response['inspection_path'] = inspection
+        return types.CallToolResult(isError=True, content=[types.TextContent(type="text", text=json.dumps(response, ensure_ascii=False))])
 
 async def main():
     try:
         print("Initializing MCP server for Illustrator...", file=sys.stderr)
         sys.stderr.flush()
         logging.info("Initializing MCP server for Illustrator.")
+        validate_runtime_paths(os.path.dirname(os.path.abspath(__file__)), sys.executable)
         
         async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
             print("Server streams established, starting server...", file=sys.stderr)

@@ -1,18 +1,51 @@
-"""Owned script directories; reclaim dead owners only after explicit recovery."""
+"""Owned script directories; reclaim uncertain calls after explicit recovery."""
 from contextlib import contextmanager
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
 import tempfile
 
+try:
+    from .local_paths import storage_directory, validate_internal_path, safe_owned_tree
+    from . import safety
+except ImportError:
+    from local_paths import storage_directory, validate_internal_path, safe_owned_tree
+    import safety
+
+logger = logging.getLogger(__name__)
+
 
 def script_root():
-    path = Path(os.environ.get('ILLUSTRATOR_SCRIPT_DIR', str(Path(tempfile.gettempdir()) / 'illustrator-mcp-scripts')))
-    path.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink() or getattr(path, 'is_junction', lambda: False)():
-        raise RuntimeError('unsafe_script_directory: links are not allowed')
-    return path.resolve()
+    return storage_directory('scripts', 'ILLUSTRATOR_SCRIPT_DIR')
+
+
+@contextmanager
+def owned_directory(root, prefix, *, retain_on_error=False, retain=None, on_retain=None):
+    path = Path(tempfile.mkdtemp(prefix=prefix, dir=root))
+    failed = False
+    try:
+        validate_internal_path(path)
+        yield path
+    except BaseException as error:
+        failed = True
+        if retain_on_error:
+            error.inspection_path = str(path)
+            error.add_note('inspection_path: ' + str(path))
+        raise
+    finally:
+        if (failed and retain_on_error) or (retain is not None and retain()):
+            if on_retain is not None:
+                try:
+                    on_retain(path)
+                except (OSError, RuntimeError):
+                    logger.warning('Could not mark retained script directory as complete: %s', path)
+            logger.warning('Retained script directory for explicit inspection/recovery: %s', path)
+        elif safe_owned_tree(path):
+            shutil.rmtree(path)
+        else:
+            logger.warning('Retained temporary directory whose local ownership could not be verified: %s', path)
 
 
 def owner_alive(pid):
@@ -44,12 +77,25 @@ def owner_alive(pid):
 @contextmanager
 def script_file(code):
     root = script_root()
-    with tempfile.TemporaryDirectory(prefix=f'call-{os.getpid()}-', dir=root) as directory:
-        path = Path(directory)
-        (path/'owner.json').write_text(json.dumps({'kind':'illustrator-mcp-script','pid':os.getpid()}), encoding='utf-8')
-        script = path/'script.jsx'
-        script.write_text(code, encoding='utf-8')
-        yield str(script)
+    retained = False
+    path = None
+    owner = {'kind':'illustrator-mcp-script','pid':os.getpid()}
+    def mark_retained(directory):
+        nonlocal retained
+        retained = True
+        owner.update({'inspection_required':True,'completed':True})
+        validate_internal_path(directory/'owner.json').write_text(json.dumps(owner), encoding='utf-8')
+    try:
+        with owned_directory(root, prefix=f'call-{os.getpid()}-', retain_on_error=True,
+                             retain=safety.should_retain_script, on_retain=mark_retained) as path:
+            safety.script_directory_started(path)
+            (path/'owner.json').write_text(json.dumps(owner), encoding='utf-8')
+            script = path/'script.jsx'
+            script.write_text(code, encoding='utf-8')
+            yield str(script)
+    finally:
+        if path is not None:
+            safety.script_directory_finished(path, retained=retained)
 
 
 def cleanup_stale_scripts():
@@ -57,20 +103,24 @@ def cleanup_stale_scripts():
     root = script_root()
     removed = 0
     for path in root.glob('call-*'):
-        if not path.is_dir() or path.is_symlink() or getattr(path, 'is_junction', lambda: False)():
+        try:
+            resolved = validate_internal_path(path)
+        except (RuntimeError, OSError):
             continue
-        resolved = path.resolve()
-        if resolved.parent != root:
+        if not resolved.is_dir() or resolved.parent != root:
             continue
         try:
-            owner = json.loads((resolved/'owner.json').read_text(encoding='utf-8'))
-        except (OSError, ValueError):
+            owner_path = validate_internal_path(resolved/'owner.json')
+            owner = json.loads(owner_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, RuntimeError):
             continue
         pid = owner.get('pid')
+        completed_retained = owner.get('completed') is True and owner.get('inspection_required') is True
         if (owner.get('kind') != 'illustrator-mcp-script' or type(pid) is not int or pid <= 0
-                or not path.name.startswith(f'call-{pid}-') or owner_alive(pid)):
+                or not path.name.startswith(f'call-{pid}-') or owner_alive(pid) and not completed_retained):
             continue
         # Resolved target is a direct child of our owned root, never a drive/user root.
-        shutil.rmtree(resolved)
-        removed += 1
+        if safe_owned_tree(resolved):
+            shutil.rmtree(resolved)
+            removed += 1
     return removed
