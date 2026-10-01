@@ -1,7 +1,20 @@
 # Boundary hardening contract
 
 Branch: `codex/boundary-hardening`. The tested host is Windows, Illustrator
-28.6.0, Python 3.12.14. macOS retains its backend path but is not live-verified.
+28.6.0, Python 3.12.14. The `codex/local-only` branch also has one macOS local
+workflow smoke test on Illustrator 30.8.1; it does not replace the full historical
+Windows acceptance or certify macOS screenshot/multi-window behavior.
+
+The `codex/local-only` branch adds client guidance to use only local operations.
+The policy is delivered in the MCP initialization response, the `run` tool
+description and design prompts. It forbids requesting Adobe cloud/Firefly/
+generative features, cloud documents, online assets/font activation, browser
+login and network commands; unavailable local capabilities must be reported
+without a cloud fallback. It preserves all tools and arbitrary trusted JSX.
+It is not a sandbox, script filter or network firewall. Adobe's own licensing
+and background networking, and the AI client's services, are outside the policy.
+Normal startup does not download or install dependencies; installation is an
+explicit separate step. See `ACCEPTANCE_ZH.md` for verified and pending checks.
 
 - `run` executes trusted JSX in a dedicated worker. Windows COM is initialized
   on that thread. An application mutex serializes different MCP clients.

@@ -2,8 +2,13 @@
 Prompt templates and suggestions for Adobe Illustrator MCP Server
 """
 
+try:
+    from .local_policy import LOCAL_ONLY_INSTRUCTIONS
+except ImportError:
+    from local_policy import LOCAL_ONLY_INSTRUCTIONS
+
 # System prompt template for better user guidance
-SYSTEM_PROMPT_TEMPLATE = """
+SYSTEM_PROMPT_TEMPLATE = LOCAL_ONLY_INSTRUCTIONS + "\n" + """
 You are an AI assistant that can control Adobe Illustrator through ExtendScript/JavaScript. 
 You can create vector graphics, illustrations, logos, and designs directly in Illustrator.
 
@@ -151,9 +156,14 @@ ADVANCED_PROMPT_TEMPLATES = {
     Design each icon to be clear and recognizable at small sizes.
     """
 }
+ADVANCED_PROMPT_TEMPLATES = {
+    name: LOCAL_ONLY_INSTRUCTIONS + "\n" + template
+    for name, template in ADVANCED_PROMPT_TEMPLATES.items()
+}
 
 # Tips for better prompting
 PROMPTING_TIPS = [
+    "Use local documents, assets and available fonts; do not use Adobe cloud, Firefly, generative features, online font activation, browser login or network commands. Report unavailable local capabilities instead of using a cloud fallback.",
     "🎯 Be specific about dimensions, colors, and positioning",
     "📐 Use exact measurements when precision matters",
     "🎨 Describe the art style or aesthetic you want",
@@ -216,4 +226,4 @@ def display_help() -> str:
     
     help_text += "\n\n🔧 Use 'get_prompt_suggestions()' to see specific examples!"
     
-    return help_text
+    return LOCAL_ONLY_INSTRUCTIONS + "\n" + help_text

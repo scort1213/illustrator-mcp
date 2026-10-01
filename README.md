@@ -1,6 +1,12 @@
-# Illustrator MCP Windows 加固版
+# Illustrator MCP 本地操作版
 
 用于 Codex 等 MCP 客户端控制本机 Adobe Illustrator。已在 Windows + Illustrator 2024 (28.6.0) 完成实机和 Codex 对话入口主流程验收。
+
+本地操作版已在 macOS + Illustrator 30.8.1 完成一轮真实 MCP 创建、编辑、保存、PNG 导出、关闭重开验收；本次未重新验收 Windows，macOS 的全屏 `view` 未调用。
+
+本分支保留全部 9 个工具和任意可信 JSX。MCP 初始化指令、`run` 说明和设计提示统一要求：只做本地编辑与本地文件操作，不调用 Firefly、生成式 AI、云文档、在线素材、在线字体激活、浏览器登录或联网命令；本地能力缺失时直接说明，不改走云服务。Windows 与 macOS 使用相同指令。
+
+这些是给调用助手的明确指令，不是脚本沙箱或网络拦截；`run` 不过滤脚本，不能保证调用者一定遵守。Adobe 软件自身的许可登录、后台联网，以及 AI 客户端的账号和服务不在本次范围内。新增规则的自动化验证与历史实机验收分别记录，不能相互替代。
 
 - [Windows 安装与 Codex 配置](WINDOWS_CODEX_SETUP.md)
 - [中文验收记录与尚未覆盖的边界](ACCEPTANCE_ZH.md)
@@ -8,7 +14,7 @@
 
 下载此分支源码 ZIP 并解压，安装 Python 3.12，然后运行 `powershell -File .\install-windows.ps1`。安装脚本创建独立环境，不修改 Codex 配置。详细步骤见上方安装说明。
 
-本 Fork 基于 [krVatsal/illustrator-mcp](https://github.com/krVatsal/illustrator-mcp)，保留原项目说明如下。Windows 用户以以上安装和验收文档为准；macOS 路径未在此加固版实机认证。
+本 Fork 基于 [krVatsal/illustrator-mcp](https://github.com/krVatsal/illustrator-mcp)，保留原项目说明如下。Windows 用户以以上安装和验收文档为准；macOS 仅完成验收记录中的单轮本地主流程，未覆盖所有原加固版实机项目。
 
 ---
 
@@ -45,7 +51,7 @@ Works on **Windows** (COM automation) and **macOS** (AppleScript/osascript).
 ### 1. Clone the repository
 
    ```bash
-   git clone --branch codex/boundary-hardening https://github.com/scort1213/illustrator-mcp.git
+   git clone --branch codex/local-only https://github.com/scort1213/illustrator-mcp.git
    cd illustrator-mcp
    ```
 
@@ -66,9 +72,12 @@ python -m venv .venv
 ### 3. Install dependencies
 
 ```bash
-pip install -r requirements.txt
+python -m pip install --require-hashes -r requirements.txt
+python -m pip install --no-deps .
 ```
 > On macOS, `pywin32` is automatically skipped. No extra macOS packages required.
+> Installation is explicit and may download packages. Normal server startup does not install or upgrade packages.
+> The second command installs this local project so the client's `-m illustrator` entry point also works when its working directory is outside this checkout. It may download the pinned build tool during this explicit installation step.
 
 ### 4. Start the MCP Server (manual / debug mode)
 
@@ -76,19 +85,21 @@ pip install -r requirements.txt
 python -m illustrator
 ```
 
-### Run with one script (cross-platform)
+### Start an installed environment with one script
 
 ```bash
 bash run_server.sh
 ```
 
-This script auto-detects your platform, creates a `.venv`, installs dependencies, and starts the server.
+This script checks the existing `.venv` and pinned runtime dependencies, then starts the server. If the environment is missing or incompatible, it stops with explicit installation instructions. It never creates an environment, runs `ensurepip`, installs packages or upgrades pip. Launcher messages go to stderr so stdout stays available for MCP.
 
 ---
 
 ## 🔌 Client Configuration
 
 The server uses **stdio transport** — compatible with all major MCP clients.
+
+The initialization response carries the local-operation policy to the client. Tool discovery and all existing script parameters remain compatible. Reload/restart the client after updating this checkout so it receives the new instructions and tool descriptions.
 
 > **Important:** Do NOT start the server manually when using it through a client. The client starts and manages the server process automatically.
 

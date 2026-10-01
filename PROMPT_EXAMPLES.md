@@ -2,6 +2,12 @@
 
 This file contains comprehensive examples and templates for creating amazing content in Adobe Illustrator using natural language prompts.
 
+Apply every example using local Illustrator operations and available local files,
+assets and fonts. Do not invoke Firefly, generative AI, cloud documents, online
+assets/font activation, browser login or network commands. If a local capability
+is unavailable, report it rather than using a cloud or sign-in fallback. These
+are assistant instructions; trusted JSX remains unfiltered and is not sandboxed.
+
 ## 🚀 Quick Start Examples
 
 ### Basic Shapes

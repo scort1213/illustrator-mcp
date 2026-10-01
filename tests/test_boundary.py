@@ -54,7 +54,8 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_script_rejected_and_path_literals_escaped(self):
         with self.assertRaises(ValueError):wrap('')
         with self.assertRaises(ValueError):wrap('1','relative.ai')
-        code=wrap('1',r'C:\测试\a"b.ai')
+        target = r'C:\测试\a"b.ai' if os.name == 'nt' else '/tmp/测试/a"b.ai'
+        code=wrap('1',target)
         self.assertIn('ambiguous_document',code);self.assertIn('finally',code)
     async def test_literal_error_text_is_not_an_execution_error(self):
         with patch.object(safety,'execute',new=AsyncMock(return_value='Error: literal content')):

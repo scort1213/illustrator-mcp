@@ -13,10 +13,12 @@ try:
     from . import safety
     from .guard import wrap, STATE_SCRIPT
     from .script_files import cleanup_stale_scripts
+    from .local_policy import LOCAL_ONLY_INSTRUCTIONS
 except ImportError:
     import safety
     from guard import wrap, STATE_SCRIPT
     from script_files import cleanup_stale_scripts
+    from local_policy import LOCAL_ONLY_INSTRUCTIONS
 import mcp.types as types
 from mcp.server.models import InitializationOptions
 from mcp.server import NotificationOptions, Server
@@ -53,7 +55,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 
-server = Server("illustrator")
+server = Server("illustrator", instructions=LOCAL_ONLY_INSTRUCTIONS)
 
 # Initialise the platform-specific backend (Windows COM or macOS AppleScript).
 # This is done lazily on first tool call to avoid errors at import time when
@@ -101,11 +103,15 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="run",
-            description="Run ExtendScript code in Illustrator",
+            description=("Run trusted ExtendScript code for local Illustrator work. "
+                         "Keep normal local scripts available; this tool is not sandboxed. "
+                         "Follow the local-operation policy: no Adobe cloud/Firefly/generative features, "
+                         "cloud documents, online assets/font activation, browser login or network commands. "
+                         "Report unavailable local capabilities; never fall back to cloud or sign-in."),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "minLength":1, "description": "Trusted ExtendScript code; not sandboxed."},
+                    "code": {"type": "string", "minLength":1, "description": "Trusted local-operation ExtendScript; follow server instructions. Not filtered or sandboxed."},
                     "target_path": {"type":"string", "description":"Full path of an open saved document; required when several documents are open."},
                     "timeout_seconds": {"type":"number", "exclusiveMinimum":0, "maximum":120, "default":30}
                 },
@@ -256,7 +262,7 @@ async def _handle_call_tool(name: str, arguments: dict | None):
                         result_text += f"• {prompt}\n"
                     result_text += "\n"
             
-            return [types.TextContent(type="text", text=result_text)]
+            return [types.TextContent(type="text", text=LOCAL_ONLY_INSTRUCTIONS + "\n" + result_text)]
         except Exception as e:
             logging.error(f"Error getting prompt suggestions: {str(e)}")
             return [types.TextContent(type="text", text=f"Error: {str(e)}")]
@@ -355,6 +361,7 @@ async def main():
                 InitializationOptions(
                     server_name="illustrator",
                     server_version="0.1.0",
+                    instructions=LOCAL_ONLY_INSTRUCTIONS,
                     capabilities=server.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={},
