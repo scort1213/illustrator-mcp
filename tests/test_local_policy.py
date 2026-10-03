@@ -53,12 +53,14 @@ class LocalPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_stdio_handshake_delivers_policy_and_keeps_all_tools(self):
         # Fail the child if normal MCP handshake/prompt reads attempt a network connection.
+        # Windows' event loop creates a loopback socket pair during construction.
+        # Construct that infrastructure first, then audit all server startup/tool work.
         bootstrap = (
-            'import asyncio, sys; '
+            'import asyncio, sys; loop = asyncio.new_event_loop(); '
             'sys.addaudithook(lambda event, args: '
             '(_ for _ in ()).throw(RuntimeError("Network connection attempted")) '
             'if event in ("socket.connect", "socket.getaddrinfo") else None); '
-            'from illustrator.server import main; asyncio.run(main())'
+            'from illustrator.server import main; loop.run_until_complete(main()); loop.close()'
         )
         params = StdioServerParameters(
             command=sys.executable, args=["-c", bootstrap], cwd=PROJECT_ROOT,
@@ -125,7 +127,7 @@ class LocalPolicyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertGreater(child.call_args.kwargs['timeout'], 100)
                 self.assertLessEqual(child.call_args.kwargs['timeout'], 120)
 
-    @unittest.skipUnless(shutil.which("bash"), "Bash is required for launcher stdio verification")
+    @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "POSIX Bash is required for launcher stdio verification")
     async def test_real_launcher_stdio_handshake(self):
         params = StdioServerParameters(
             command=shutil.which("bash"), args=[str(PROJECT_ROOT / "run_server.sh")], cwd=PROJECT_ROOT,

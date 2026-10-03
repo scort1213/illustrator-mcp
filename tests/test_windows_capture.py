@@ -1,11 +1,19 @@
 """Regression: an occluding AI-client window must not appear in the capture."""
 import unittest
 from unittest.mock import Mock, patch
-from PIL import Image
+from PIL import Image, ImageDraw
 from illustrator.platform_backend import WindowsBackend
 
 
 class WindowsCaptureTests(unittest.TestCase):
+    def test_unrendered_gray_surface_is_rejected_but_white_artboard_is_allowed(self):
+        gray = Image.new('RGB', (640, 400), (38, 38, 38))
+        ImageDraw.Draw(gray).rectangle((0, 0, 639, 15), fill=(80, 80, 80))
+        with self.assertRaisesRegex(RuntimeError, 'capture_unavailable'):
+            WindowsBackend._verify_window_capture(gray)
+        white = Image.new('RGB', (640, 400), 'white')
+        WindowsBackend._verify_window_capture(white)
+
     def test_minimized_window_returns_error_without_a_desktop_fallback(self):
         gui = Mock()
         gui.EnumWindows.side_effect = lambda fn, arg: fn(2, arg)

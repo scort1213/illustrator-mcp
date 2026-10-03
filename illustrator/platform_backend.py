@@ -112,6 +112,32 @@ class WindowsBackend(IllustratorBackend):
         shell = self._win32com.client.Dispatch("WScript.Shell")
         shell.AppActivate("Adobe Illustrator")
 
+    @staticmethod
+    def _verify_window_capture(image):
+        """Reject the known unrendered dark-gray surface, not infer art validity.
+
+        A conservative rejection can also match intentionally uniform gray art.
+        Other capture defects still require visual inspection by the caller.
+        """
+        width, height = image.size
+        rgb = image.convert('RGB')
+        center = rgb.crop((width // 10, height // 10, width * 9 // 10, height * 9 // 10))
+        ranges = center.getextrema()
+        if not ranges or any(high - low > 3 for low, high in ranges):
+            return
+        gray = [(low + high) / 2 for low, high in ranges]
+        if max(gray) > 96 or max(gray) - min(gray) > 3:
+            return
+        sample = rgb.resize((128, 128))
+        matches = sum(all(abs(pixel[i] - gray[i]) <= 3 for i in range(3))
+                      for pixel in sample.get_flattened_data())
+        if matches >= 128 * 128 * 0.8:
+            raise RuntimeError(
+                'capture_unavailable: Illustrator returned an unverified near-uniform dark-gray window. '
+                'Use run to export the intended artboard to a local PNG for review. '
+                'No desktop fallback was captured.'
+            )
+
     def capture_screenshot(self, *, deadline=None) -> str:
         from PIL import ImageGrab
         import win32gui
@@ -134,6 +160,7 @@ class WindowsBackend(IllustratorBackend):
             raise RuntimeError("Illustrator is minimized. Restore its window before capturing.")
         remaining_seconds(deadline)
         screenshot = ImageGrab.grab(window=hwnd)
+        self._verify_window_capture(screenshot)
         logger.info("Screenshot captured (Windows/Illustrator window).")
         return self._image_to_base64_jpeg(screenshot)
 

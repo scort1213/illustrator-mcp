@@ -22,6 +22,8 @@ def wrap(code, target_path=None):
         raise ValueError("invalid_argument: code must be a non-empty string")
     if target_path is not None and (not isinstance(target_path, str) or not target_path.strip() or not os.path.isabs(target_path)):
         raise ValueError("invalid_argument: target_path must be a non-empty absolute file path")
+    if target_path is not None and os.name == 'nt' and not os.path.splitdrive(target_path)[0]:
+        raise ValueError("invalid_argument: target_path must include its Windows drive or UNC share")
     expected = 'new File(target).fsName.toLowerCase()' if os.name == 'nt' else 'target'
     candidate = 'app.documents[i].fullName.fsName' + ('.toLowerCase()' if os.name == 'nt' else '')
     return '''(function(){

@@ -114,9 +114,11 @@ def cleanup_stale_scripts():
             owner = json.loads(owner_path.read_text(encoding='utf-8'))
         except (OSError, ValueError, RuntimeError):
             continue
+        if not isinstance(owner, dict):
+            continue
         pid = owner.get('pid')
         completed_retained = owner.get('completed') is True and owner.get('inspection_required') is True
-        if (owner.get('kind') != 'illustrator-mcp-script' or type(pid) is not int or pid <= 0
+        if (owner.get('kind') != 'illustrator-mcp-script' or type(pid) is not int or not 0 < pid <= 0xFFFFFFFF
                 or not path.name.startswith(f'call-{pid}-') or owner_alive(pid) and not completed_retained):
             continue
         # Resolved target is a direct child of our owned root, never a drive/user root.

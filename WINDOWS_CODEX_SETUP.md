@@ -4,7 +4,7 @@
 
 ## 安装
 
-下载 codex/local-only 分支源码 ZIP 并解压，在目录中运行：
+Windows 审核版使用独立分支 `codex/windows-audit-20261004`（基于 `f6d60da`）。下载该分支源码 ZIP 并解压，在新目录中运行：
 
 ```powershell
 powershell -File .\install-windows.ps1
@@ -46,6 +46,10 @@ run 执行可信 JSX，不是沙箱。保存前检查输出路径并保留副本
 
 升级到新的内部目录前，重载全部客户端、确认旧操作结束并先 get_state 核对；旧 TEMP 目录不会自动搬迁或清理。需要复用原本地安全目录时保留同一个 ILLUSTRATOR_SAFETY_DIR，避免不同客户端使用不同锁。
 
+Windows 审核版还统一了短路径和尾点路径的互斥标识。升级时须停止旧版本客户端的工作并统一重载，不能把旧客户端与新版本混用当作并发保护已验证。此分支不修改远端 main 或已有 Mac 版本；Mac 实机回归不属于本次 Windows 验收。
+
 本地使用指令要求助手不调用 Firefly、生成式 AI、云文档、在线素材或字体激活、浏览器登录及联网命令；遇到本地资源缺失只报告问题，不转用云服务。这些指令保留脚本灵活性，不对任意 JSX 做运行时拦截。Adobe 自身登录、后台联网及 AI 客户端行为不在该指令的控制范围内。
 
 详细范围见 [中文验收记录](ACCEPTANCE_ZH.md) 和 [加固约定](BOUNDARY_HARDENING.md)。
+
+本次 Windows 修复、复验和审核项目调用方式见 [WINDOWS_AUDIT_20261004.md](WINDOWS_AUDIT_20261004.md)。

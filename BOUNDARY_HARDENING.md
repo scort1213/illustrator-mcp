@@ -77,6 +77,10 @@ explicit separate step. See `ACCEPTANCE_ZH.md` for verified and pending checks.
 - `view` captures the application window. Minimized/unavailable windows report
   an error instead of falling back to the desktop. Arbitrary duplicate-window
   configurations and alternate DPI/monitor configurations are not certified.
+  The Windows audit branch also rejects the observed near-uniform dark-gray
+  unrendered capture. This is a conservative heuristic, not proof of correct
+  rendering; deliberately uniform gray artwork may be rejected. Explicit local
+  artboard PNG export is the verified preview path on the current audited host.
 
 ## Reproduce the Windows environment
 

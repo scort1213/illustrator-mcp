@@ -1,6 +1,7 @@
 import asyncio
 import os
 import subprocess
+import sys
 import threading
 import json
 from pathlib import Path
@@ -35,6 +36,68 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         def partial():raise RuntimeError('partial change')
         with self.assertRaisesRegex(RuntimeError,'partial change'):await safety.execute(partial)
         with self.assertRaisesRegex(RuntimeError,'outcome_unknown'):await safety.execute(lambda:'retry')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows filesystem aliases and kernel mutex')
+    async def test_windows_path_aliases_share_the_same_cross_process_mutex(self):
+        import win32api
+        directory = Path(self.temp.name)
+        ready = directory / 'mutex-ready.txt'
+        holder_source = '''
+import asyncio, sys
+from pathlib import Path
+from illustrator import safety
+def hold():
+    Path(sys.argv[1]).write_text('ready', encoding='utf-8')
+    sys.stdin.readline()
+asyncio.run(safety.execute(hold, timeout=10, read_only=True))
+'''
+        contender_source = '''
+import asyncio, os, tempfile
+from illustrator import safety
+async def main():
+    target = os.environ['ILLUSTRATOR_SAFETY_DIR']
+    with tempfile.TemporaryDirectory(prefix='ai-mutex-warmup-') as warmup:
+        os.environ['ILLUSTRATOR_SAFETY_DIR'] = warmup
+        await safety.execute(lambda: 'ready', timeout=5, read_only=True)
+    os.environ['ILLUSTRATOR_SAFETY_DIR'] = target
+    try:
+        print(await safety.execute(lambda: 'entered', timeout=1, read_only=True))
+    except TimeoutError as error:
+        print(str(error))
+asyncio.run(main())
+'''
+        for alias in (str(directory) + '.', win32api.GetShortPathName(str(directory))):
+            with self.subTest(alias=alias):
+                self.assertTrue(os.path.samefile(directory, alias))
+                environment = dict(os.environ, ILLUSTRATOR_SAFETY_DIR=alias)
+                control = await asyncio.to_thread(subprocess.run,
+                    [sys.executable, '-B', '-c', contender_source], env=environment,
+                    capture_output=True, text=True, timeout=8, check=True,
+                )
+                self.assertEqual(control.stdout.strip(), 'entered',
+                                 'an uncontended call must complete within its budget')
+                ready.unlink(missing_ok=True)
+                holder = subprocess.Popen(
+                    [sys.executable, '-B', '-c', holder_source, str(ready)],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True,
+                )
+                try:
+                    deadline = time.monotonic() + 5
+                    while not ready.exists() and holder.poll() is None and time.monotonic() < deadline:
+                        await asyncio.sleep(.01)
+                    self.assertTrue(ready.exists(), 'mutex holder failed to become ready')
+                    result = await asyncio.to_thread(subprocess.run,
+                        [sys.executable, '-B', '-c', contender_source], env=environment,
+                        capture_output=True, text=True, timeout=8, check=True,
+                    )
+                    self.assertIn('queue_timeout', result.stdout)
+                finally:
+                    try:
+                        await asyncio.to_thread(holder.communicate, '\n', timeout=5)
+                    except subprocess.TimeoutExpired:
+                        holder.kill()
+                        await asyncio.to_thread(holder.communicate, timeout=5)
     async def test_deadline_during_marker_publication_never_dispatches(self):
         calls=[]
         original=Path.write_text
@@ -57,6 +120,10 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_script_rejected_and_path_literals_escaped(self):
         with self.assertRaises(ValueError):wrap('')
         with self.assertRaises(ValueError):wrap('1','relative.ai')
+        if os.name == 'nt':
+            for target in (r'\workspace\file.ai', '/workspace/file.ai'):
+                with self.assertRaisesRegex(ValueError, 'Windows drive'):
+                    wrap('1', target)
         target = r'C:\测试\a"b.ai' if os.name == 'nt' else '/tmp/测试/a"b.ai'
         code=wrap('1',target)
         self.assertIn('ambiguous_document',code);self.assertIn('finally',code)

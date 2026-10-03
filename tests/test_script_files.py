@@ -58,6 +58,18 @@ class ScriptFileTests(unittest.TestCase):
         self.assertEqual(len(list(root.iterdir())),4)
         self.assertFalse((root/'call-123-dead').exists())
 
+    def test_malformed_owner_values_are_preserved_without_blocking_recovery(self):
+        root = Path(self.temp.name)
+        values = [None, [], 'not an ownership record', 123, True,
+                  {'kind': 'illustrator-mcp-script', 'pid': 2**100}]
+        for index, value in enumerate(values):
+            pid = value['pid'] if isinstance(value, dict) else 123
+            directory = root / f'call-{pid}-malformed-{index}'
+            directory.mkdir()
+            (directory / 'owner.json').write_text(json.dumps(value), encoding='utf-8')
+        self.assertEqual(script_files.cleanup_stale_scripts(), 0)
+        self.assertEqual(len(list(root.iterdir())), len(values))
+
     def test_linked_root_is_rejected(self):
         link = Path(self.temp.name) / 'linked-root'
         link.mkdir()

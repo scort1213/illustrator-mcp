@@ -1,5 +1,9 @@
 # Illustrator MCP 本地操作版
 
+当前为独立 Windows 审核分支 `codex/windows-audit-20261004`，基于 `f6d60da`。
+核心实机编辑、保存重开、导出及超时恢复已复验；窗口截图存在明确记录的本机限制，空白捕获会返回错误。
+请先读 [本轮 Windows 验收与审核项目调用](WINDOWS_AUDIT_20261004.md)。以下 Mac 与早期 Windows 结果保留为历史记录，不代表本轮全部功能通过。
+
 用于 Codex 等 MCP 客户端控制本机 Adobe Illustrator。已在 Windows + Illustrator 2024 (28.6.0) 完成实机和 Codex 对话入口主流程验收。
 
 本地操作版已在 macOS + Illustrator 30.8.1 完成一轮真实 MCP 创建、编辑、保存、PNG 导出、关闭重开验收；本次未重新验收 Windows，macOS 的全屏 `view` 未调用。

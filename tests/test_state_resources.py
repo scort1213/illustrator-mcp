@@ -10,7 +10,7 @@ from illustrator.guard import STATE_SCRIPT, wrap
 @unittest.skipUnless(shutil.which('node') or os.environ.get('ADOBE_BOUNDARY_NODE'), 'Node is required to execute the JSX state mock')
 class StateResourceTests(unittest.TestCase):
     def node(self, source):
-        result = subprocess.run([os.environ.get('ADOBE_BOUNDARY_NODE') or shutil.which('node'), '-e', source], capture_output=True, text=True, check=True)
+        result = subprocess.run([os.environ.get('ADOBE_BOUNDARY_NODE') or shutil.which('node'), '-e', source], capture_output=True, text=True, encoding='utf-8', check=True)
         return json.loads(result.stdout)
 
     def test_state_reports_metadata_without_reading_any_link_file(self):
@@ -77,7 +77,7 @@ process.stdout.write(JSON.stringify({result,error,fileCalls,active:app.activeDoc
         self.assertEqual(result['interaction'], 'visible')
 
     def test_windows_case_insensitive_compatibility_is_preserved(self):
-        result = self.target([{'name':'upper','path':'/local/A.ai'}], '/local/a.ai', windows=True)
+        result = self.target([{'name':'upper','path':'C:/local/A.ai'}], 'C:/local/a.ai', windows=True)
         self.assertEqual(result['result'], 'upper')
         self.assertEqual(result['fileCalls'], 1)
 

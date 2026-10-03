@@ -68,7 +68,10 @@ async def execute(function, timeout=30.0, read_only=False, recover=False, pass_d
             import win32api
             pythoncom.CoInitialize()
             try:
-                name = "Local\\IllustratorMCP-" + hashlib.sha256(os.path.normcase(str(storage)).encode()).hexdigest()[:24]
+                # Windows short names and trailing dots can identify the same
+                # directory. All aliases must use the same kernel mutex.
+                identity = os.path.normcase(str(storage.resolve()))
+                name = "Local\\IllustratorMCP-" + hashlib.sha256(identity.encode()).hexdigest()[:24]
                 mutex = win32event.CreateMutex(None, False, name)
             except BaseException:
                 pythoncom.CoUninitialize()
