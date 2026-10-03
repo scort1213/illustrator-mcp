@@ -61,7 +61,7 @@ class LocalStorageTests(unittest.TestCase):
         with patch.object(Path, 'home', return_value=root), patch.dict(os.environ, {'TMPDIR':'//example.invalid/share'}):
             for kind in ('scripts', 'safety', 'preview'):
                 directory = local_paths.storage_directory(kind)
-                self.assertEqual(directory, (root / '.illustrator-mcp' / kind).resolve())
+                self.assertEqual(directory.resolve(), (root / '.illustrator-mcp' / kind).resolve())
                 self.assertTrue(directory.is_dir())
 
     def test_runtime_validation_checks_all_roots_without_creating_them(self):
@@ -161,14 +161,20 @@ class LocalStorageTests(unittest.TestCase):
         (directory / 'owner.json').write_text(json.dumps({'kind':'illustrator-mcp-script','pid':123}))
         (directory / 'script.jsx').write_text('synthetic source')
         nested = directory / 'remote-child'; nested.write_text('synthetic link fixture')
-        canonical_nested = nested.resolve()
         original = os.lstat
+        nested_info = original(nested)
+        matched = []
         def lstat(path, *args, **kwargs):
-            if Path(path) == canonical_nested:
+            info = original(path, *args, **kwargs)
+            # File identity matches both long paths and Windows 8.3 aliases.
+            # Resolving inside this hook would recurse through mocked lstat on POSIX.
+            if os.path.samestat(info, nested_info):
+                matched.append(path)
                 return SimpleNamespace(st_mode=stat.S_IFLNK)
-            return original(path, *args, **kwargs)
+            return info
         with patch.dict(os.environ, {'ILLUSTRATOR_SCRIPT_DIR': str(root)}), patch.object(script_files, 'owner_alive', return_value=False), patch('illustrator.local_paths.os.lstat', side_effect=lstat):
             self.assertEqual(script_files.cleanup_stale_scripts(), 0)
+        self.assertTrue(matched, 'the nested-link fixture must actually be inspected')
         self.assertTrue((directory / 'script.jsx').exists())
 
 

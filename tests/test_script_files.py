@@ -73,15 +73,20 @@ class ScriptFileTests(unittest.TestCase):
     def test_linked_root_is_rejected(self):
         link = Path(self.temp.name) / 'linked-root'
         link.mkdir()
-        canonical_link = link.resolve()
         original = os.lstat
+        link_info = original(link)
+        matched = []
         def lstat(path, *args, **kwargs):
-            if Path(path) == canonical_link:
+            info = original(path, *args, **kwargs)
+            # Compare file identity so the fake link works with 8.3 temp roots.
+            if os.path.samestat(info, link_info):
+                matched.append(path)
                 return SimpleNamespace(st_mode=stat.S_IFLNK)
-            return original(path, *args, **kwargs)
+            return info
         with patch.dict(os.environ, {'ILLUSTRATOR_SCRIPT_DIR': str(link)}), patch('illustrator.local_paths.os.lstat', side_effect=lstat):
             with self.assertRaisesRegex(RuntimeError,'local_path_required'):
                 script_files.script_root()
+        self.assertTrue(matched, 'the linked-root fixture must actually be inspected')
 
     def test_recovery_cleanup_requires_a_valid_adobe_snapshot(self):
         async def execute(function,**kwargs):return function(time.monotonic()+30) if kwargs.get('pass_deadline') else function()
