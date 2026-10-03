@@ -86,10 +86,11 @@ class TestMacBackendRunScript(BackendStorageTests):
     @mock.patch("illustrator.platform_backend.subprocess.run")
     def test_long_deadline_reaches_subprocess_without_thirty_second_cap(self, child):
         child.return_value = mock.Mock(returncode=0, stdout='42', stderr='')
-        deadline = time.monotonic() + 120
-        self.assertEqual(self._make_backend().run_script('42', deadline=deadline), '42')
-        self.assertGreater(child.call_args.kwargs['timeout'], 100)
-        self.assertLessEqual(child.call_args.kwargs['timeout'], 120)
+        # A fixed clock tests the forwarded budget without host timer rounding
+        # (Windows CI can otherwise subtract to 120.00000000000003 seconds).
+        with mock.patch('illustrator.platform_backend.time.monotonic', return_value=101.0):
+            self.assertEqual(self._make_backend().run_script('42', deadline=220.0), '42')
+        self.assertEqual(child.call_args.kwargs['timeout'], 119.0)
 
     @mock.patch("illustrator.platform_backend.subprocess.run")
     def test_expired_deadline_never_dispatches(self, child):
