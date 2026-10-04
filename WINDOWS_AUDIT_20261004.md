@@ -115,3 +115,19 @@ app.activeDocument.exportFile(new File("D:/audit-work/text-subset.svg"), ExportT
 **恢复和最终状态。** 超时后没有重放导出或结束进程。发现文件已完整生成这一新证据后，才重新读取状态，确认只有自己的 `allglyphs.svg` 且已保存，显式调用 `recover_connection`，再关闭自己的文档。随后的一次首页返回对照也只操作专用副本并关闭；最终真实状态为零文档。无需用户再处理此次 SVG 隔离现场。已核验的临时副本可以清理，保留精简证据和小字形子集 SVG。
 
 **原生客户端接入仍需客户端操作。** 已安装解释器和 stdio 接口已验证，当前会话尚未验证原生 MCP 重载。将本文前面的独立服务器配置加入审核项目或客户端 MCP 设置，然后重载该连接；服务器/连接列表出现 `illustrator_windows_audit`，且其工具包含 `get_state` 后，先调用 `get_state({})`。不自动替换其他项目服务器或改写全局配置。
+
+## 窗口问题定位与可用的原生预览
+
+进一步对照仍未通过应用窗口截图验收，但已找到可用的文档预览方式：现有 `run` 工具调用 `Document.windowCapture`。实机生成的 800×600 TIFF 已目视确认包含两个画板、中英文文本和预期矢量图形；同一时刻的外部 `view` 仍为主页。[完整调用配方](WINDOWS_DOCUMENT_PREVIEW.md)。这不是应用整窗截图的替代验收。
+
+定位证据如下：
+
+- GDI 和 Windows Graphics Capture 对同一已核对 PID/HWND 的 Illustrator 窗口均得到主页。WGC 只传入精确窗口句柄，未使用桌面/显示器回退；诊断依赖已清理，未加入产品依赖。
+- 对照 `DONTDISPLAYALERTS` 与开文档前临时 `DISPLAYALERTS`，结果相同；脚本结束后的实际全局交互级别为 `DISPLAYALERTS`，已恢复。不能把 guard 内读到的临时值当作全局配置。
+- 打开文档后 COM `HomeScreenVisible` 为 false，文档数为 1；同一进程只有一个可见顶层窗口，标题正确包含专用副本文件名。没有发现被窗口类筛选遗漏的另一个可见文档窗。
+- 从正常文件打开入口调用 Illustrator，也得到相同结果。输入桌面为 `Default`。该对照复用了现有进程，不证明 `/Automation` 启动模式无关。
+- 文档报告 `DefaultPreview` / `NormalScreenMode` / `GPU Preview`；原生文档窗口捕获成功。未切换 GPU 设置、修改工作区或重置偏好。
+
+当前异常表现为主窗口显示或外部捕获结果与文档状态不一致；文档内容读取、编辑和原生渲染有成功证据。现有证据不足以判定具体为 Adobe 工作区状态、Windows 合成兼容性或 GPU 驱动问题，不应直接归因，也不应通过扩大截图范围掩盖问题。没有为未经证实的原因修改运行时代码或 Mac 实现。
+
+验收脚本另修正了一个可确认的问题：JPEG 可解码只表示图像传输成功。自动业务检查完成且无其他失败时，脚本现在返回 `NEEDS_VISUAL_REVIEW` 和退出码 2；发生失败仍返回 `FAIL` 和退出码 1。必须另行检查保存的图像，不能把自动脚本成功当作文档画面正确。

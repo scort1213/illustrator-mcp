@@ -7,6 +7,8 @@ Run with an installed project Python, with Illustrator open and NO documents ope
 The workspace must not exist. All artwork is synthetic. Nothing is deleted; a
 failure leaves its report, scripts, server log and artwork for inspection. This
 is an opt-in real-Adobe runner, deliberately outside the unit-test suite.
+Image decoding does not verify the visible artwork. Manual visual review is
+required: exit code 2 means NEEDS_VISUAL_REVIEW; a failed check returns 1.
 """
 from __future__ import annotations
 
@@ -80,6 +82,9 @@ class Acceptance:
         self.report = {
             'schema_version': 1, 'run_id': self.token, 'started_utc': utc_now(),
             'status': 'RUNNING', 'real_adobe': True, 'transport': 'MCP stdio',
+            'visual_review': 'not_performed',
+            'visual_review_note': 'Manually inspect illustrator-view.jpg and the exported artwork. '
+                                  'Image decoding does not verify the expected document or artwork is visible.',
             'workspace': str(workspace), 'repository': str(repository),
             'server_python': str(server_python), 'runner_python': sys.version,
             'platform': platform.platform(), 'steps': [],
@@ -284,7 +289,9 @@ d.exportFile(new File({js(str(self.png_path))}),ExportType.PNG24,png);
                 dimensions = list(screenshot.size)
                 screenshot.verify()
             (self.workspace / 'illustrator-view.jpg').write_bytes(data)
-            self.record('view-image-saved', 'PASS', file='illustrator-view.jpg', dimensions=dimensions)
+            self.record('view-image-saved', 'PASS', file='illustrator-view.jpg', dimensions=dimensions,
+                        visual_review='not_performed',
+                        reason='Image decoding and saving passed; manual visual review is required.')
         except Exception as error:
             self.report['view_failure'] = repr(error)
             self.record('view-incomplete', 'FAIL', exception=repr(error))
@@ -452,11 +459,11 @@ def main():
     finally:
         failed = (not acceptance.report.get('workflow_completed', False)
                   or any(step['status'] == 'FAIL' for step in acceptance.report['steps']))
-        acceptance.report['status'] = 'FAIL' if failed else 'PASS'
+        acceptance.report['status'] = 'FAIL' if failed else 'NEEDS_VISUAL_REVIEW'
         acceptance.report['finished_utc'] = utc_now()
         acceptance.flush()
     print(f'{acceptance.report["status"]}: {workspace / "report.json"}', flush=True)
-    return 1 if acceptance.report['status'] != 'PASS' else 0
+    return 1 if failed else 2
 
 
 if __name__ == '__main__':

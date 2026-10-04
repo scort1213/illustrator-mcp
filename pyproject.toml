@@ -20,4 +20,4 @@ illustrator = "illustrator.cli:run_server"
 packages = ["illustrator"]
 
 [tool.hatch.build.targets.sdist]
-include = ["illustrator", "tests", "scripts", "pyproject.toml", "README.md", "WINDOWS_CODEX_SETUP.md", "WINDOWS_AUDIT_20261004.md", "ACCEPTANCE_ZH.md", "BOUNDARY_HARDENING.md", "PROMPT_EXAMPLES.md", "requirements.txt", "uv.lock", "install-windows.ps1"]
+include = ["illustrator", "tests", "scripts", "pyproject.toml", "README.md", "WINDOWS_CODEX_SETUP.md", "WINDOWS_AUDIT_20261004.md", "WINDOWS_DOCUMENT_PREVIEW.md", "ACCEPTANCE_ZH.md", "BOUNDARY_HARDENING.md", "PROMPT_EXAMPLES.md", "requirements.txt", "uv.lock", "install-windows.ps1"]
