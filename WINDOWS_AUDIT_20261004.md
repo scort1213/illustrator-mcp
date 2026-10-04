@@ -82,3 +82,36 @@ Windows、Illustrator 28.6.0、Python 3.12.14、MCP 1.30.0、Pillow 12.3.0、pyw
 上述核心编辑/恢复结果可供审核和美工复用；本分支是带已知截图限制的 Windows 审核交付，不是全部 Windows 图形场景认证。原有 main/Mac 历史不被覆盖。
 
 源码与文档可上传仓库；私人原稿、副本、应用截图、机器路径和原始日志只保存在本地证据目录。
+
+## 2026-10-04 UTC 有界补测
+
+本轮没有更改运行时代码，没有重复上一轮全部业务验收，也没有修改系统权限、全局 MCP 配置或结束 Illustrator 进程。
+
+**截图：尚未通过文档画面验收。** 新启动的 COM 实例先能处理文档，但 UI 尚未出现；窗口就绪后确认位于同一交互会话的 WinSta0/Default。现有 `view` 可以返回首页图像，但不含已打开的合成文档。对同 PID 可见子窗口做了最多两个直接捕获，均为首页容器；单独调用受支持的 `Document.activate()`、重绘并等待脚本返回后，状态仍正确报告一份文档、一个视图，图像仍是首页。没有把“有图像返回”登记为文档预览通过。灰屏检测只覆盖已知灰屏，不能证明其他返回图像一定显示目标文档。
+
+Adobe 官方说明可点击首页左上 Illustrator 图标旁的返回箭头回到当前文档；Windows 默认 `Ctrl+E` 切换该文档的 GPU/CPU 预览。SVG 现场恢复后，本轮确认前台窗口和视口与已观察图像一致，对返回箭头位置只点击一次，捕获仍是首页，未证实界面切换。没有确认当前画布预览模式，因此未盲发快捷键、未修改全局 GPU 首选项。需要后续在真实可见画布上确认模式后才能做 CPU 对照；本轮停止继续试探。参考：[切换首页与工作区](https://helpx.adobe.com/illustrator/desktop/get-started/learn-the-basics/switch-between-the-workspace-and-homescreen.html)、[Adobe 快捷键表](https://helpx.adobe.com/illustrator/using/default-keyboard-shortcuts.html)。
+
+**SVG：取得保留文字的可用参数，完整字形导出超时后仍在后台完成。** 本机新建 `ExportOptionsSVG` 实际读数为 `SVGFONT + ALLGLYPHS`，嵌入位图和保留可编辑性均为 false；不能以参考文档的默认值替代本机读数。两个测试副本字节相同，均使用原有 MicrosoftYaHei 文字，导出时显式设置 `SVGFONT` 和嵌入位图，仅改变字体子集：
+
+| 字体子集 | 本轮结果 |
+| --- | --- |
+| `GLYPHSUSED` | 单独导出 0.250 秒；13,273 字节，XML 可解析，含 1 个 text、1 个 font、25 个 glyph、1 个 image；自己的副本已关闭。 |
+| `ALLGLYPHS` | 30.015 秒返回 `outcome_unknown`；随后仅一次状态读取在 30.016 秒返回 `queue_timeout`，未派发到 Adobe。初次文件检查为 0 字节；整理时发现后台已完成 26,935,538 字节的有效 SVG，含 29,693 个 glyph。原生 AI 副本哈希未变。未测得精确导出总耗时。 |
+
+该单变量对照说明本机完整字形导出会超过此次 30 秒预算并产生大文件，本次不是永久挂起，没有证据认定 MCP 转发代码有错。两个 SVG 都能解析，文字元素内容与预期合成文字一致；只验证了文件生成、文字内容和 XML 结构，本轮没有重开或渲染 SVG，不把这些检查当作视觉一致性验收。已通过的 PNG 导出和上一轮 OUTLINE 路径仍是独立事实。
+
+在已明确选定、已保存的专用副本中，可复用以下经过本轮文件级验证的导出选项：
+
+```javascript
+var options = new ExportOptionsSVG();
+options.fontType = SVGFontType.SVGFONT;
+options.fontSubsetting = SVGFontSubsetting.GLYPHSUSED;
+options.embedRasterImages = true;
+app.activeDocument.exportFile(new File("D:/audit-work/text-subset.svg"), ExportType.SVG, options);
+```
+
+本轮成功 SVG 导出后，当前文档路径变为 SVG。导出前先保存原生 AI；结束后按实际状态关闭自己的 SVG 并重开 AI，不能在未核对的导出后状态继续审核文字。
+
+**恢复和最终状态。** 超时后没有重放导出或结束进程。发现文件已完整生成这一新证据后，才重新读取状态，确认只有自己的 `allglyphs.svg` 且已保存，显式调用 `recover_connection`，再关闭自己的文档。随后的一次首页返回对照也只操作专用副本并关闭；最终真实状态为零文档。无需用户再处理此次 SVG 隔离现场。已核验的临时副本可以清理，保留精简证据和小字形子集 SVG。
+
+**原生客户端接入仍需客户端操作。** 已安装解释器和 stdio 接口已验证，当前会话尚未验证原生 MCP 重载。将本文前面的独立服务器配置加入审核项目或客户端 MCP 设置，然后重载该连接；服务器/连接列表出现 `illustrator_windows_audit`，且其工具包含 `get_state` 后，先调用 `get_state({})`。不自动替换其他项目服务器或改写全局配置。
